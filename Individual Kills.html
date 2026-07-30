@@ -1,0 +1,284 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+  }
+  #background {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    background: url('Static/Individual Kills.png') no-repeat 0 0;
+    background-size: 1920px 1080px;
+    z-index: 10;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- Background sits on top so player images appear behind it -->
+<div id="background"></div>
+
+<script>
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const CONFIG = {
+
+  playerCount: 5,
+
+  /* --- First player image: absolute position & size --- */
+  image: {
+    x: 28, y: 248, w: 373, h: 507,
+    src: "Static/PLAYER CALLING CARDS/almond.png",
+  },
+
+  /* --- Gap between each player column (px) --- */
+  playerSpacing: 373,
+
+  /* --- Second image per player (e.g. rank badge / icon) ---
+     x, y are absolute for the first player; subsequent players use playerSpacing. */
+  image2: {
+    x: 46, y: 254, w: 74, h: 74,
+    src: "Static/LOGOS - STATS/FALCONS.png",
+  },
+
+  /* --- Single static text box (not per-player) --- */
+  staticText: {
+    x: 96, y: 149, w: 1728, h: 25,
+    fontSize: 22, color: "#F0F046",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "center",
+    text: "Static label",
+  },
+
+  /* --- Name label: offset from the top-left of each player's image ---
+     w is inherited from image.w automatically. offsetY: "auto" puts it
+     directly below the image; set a number to override. */
+  name: {
+    offsetX: 0,   offsetY: "auto",
+    h: 79,
+    fontSize: 28, color: "#000000",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "400",
+    textAlign: "center",
+    text: "almond",
+  },
+
+  /* --- Kill count label: offset from the top-left of each player's image ---
+     w is inherited from image.w automatically. offsetY: "auto" puts it
+     directly below the name row; set a number to override. */
+  kills: {
+    offsetX: 0,   offsetY: "auto",
+    h: 46,
+    fontSize: 24, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "center",
+    text: "67 Kills",
+  },
+
+  /* --- Set to false to remove debug outlines --- */
+  debug: false,
+};
+
+/* ============================================================
+   RENDERER — no need to edit below this line
+   ============================================================ */
+
+const DATA_URL   = "/api/data/individual_kills";
+const REFRESH_MS = 15000;
+
+const debugBorder = CONFIG.debug ? "1px solid green" : "none";
+
+function logoPath(name) {
+  if (!name || name === "null" || name === "NONE") return "Static/LOGOS - STATS/NONE.png";
+  return "Static/LOGOS - STATS/" + name + ".png";
+}
+
+/* Preload an image URL, resolving once it has actually decoded (or after
+   a timeout / error, so one bad URL can never block the whole swap). */
+function preloadImage(src, fallback) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const finish = (finalSrc) => {
+      if (settled) return;
+      settled = true;
+      resolve({ src: finalSrc, el: img });
+    };
+    const timer = setTimeout(() => finish(img.src || fallback), 3000);
+    img.onload = () => { clearTimeout(timer); finish(src); };
+    img.onerror = () => {
+      clearTimeout(timer);
+      if (fallback && src !== fallback) {
+        preloadImage(fallback, null).then((r) => finish(r.src));
+      } else {
+        finish(fallback || src);
+      }
+    };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) { clearTimeout(timer); finish(src); }
+  });
+}
+
+async function buildFrame(subtitle, players) {
+  // Resolve every image up front so the swap-in below never has to wait.
+  const cardSrcs = [];
+  const logoSrcs = [];
+  for (let i = 0; i < CONFIG.playerCount; i++) {
+    const p = players[i] || {};
+    cardSrcs.push(preloadImage(
+      p.callingCard || "Static/PLAYER CALLING CARDS/default.png",
+      "Static/PLAYER CALLING CARDS/default.png"
+    ));
+    logoSrcs.push(preloadImage(p.logo, "Static/LOGOS - STATS/NONE.png"));
+  }
+  const [cards, logos] = await Promise.all([Promise.all(cardSrcs), Promise.all(logoSrcs)]);
+
+  const frame = document.createElement("div");
+  frame.className = "dynamic-frame";
+  Object.assign(frame.style, {
+    position: "absolute", left: "0", top: "0", width: "1920px", height: "1080px",
+    visibility: "hidden", pointerEvents: "none",
+  });
+
+  function add(tag, styles, extra) {
+    const el = document.createElement(tag);
+    Object.assign(el.style, { position: "absolute", ...styles });
+    if (extra) Object.assign(el, extra);
+    frame.appendChild(el);
+    return el;
+  }
+
+  const ST = CONFIG.staticText;
+  add("div", {
+    left: ST.x + "px", top: ST.y + "px",
+    width: ST.w + "px", height: ST.h + "px",
+    fontSize: ST.fontSize + "px", color: ST.color,
+    fontFamily: ST.fontFamily, textAlign: ST.textAlign,
+    lineHeight: ST.h + "px", fontWeight: ST.fontWeight || "bold",
+    textTransform: "uppercase", outline: debugBorder, zIndex: "20",
+  }, { textContent: subtitle });
+
+  for (let i = 0; i < CONFIG.playerCount; i++) {
+    const p = players[i] || {};
+    const px = CONFIG.image.x + i * CONFIG.playerSpacing;
+    const py = CONFIG.image.y;
+    const iw = CONFIG.image.w;
+    const ih = CONFIG.image.h;
+
+    // Calling card — behind background (z-index 1)
+    const box = add("div", {
+      left: px + "px", top: py + "px",
+      width: iw + "px", height: ih + "px", overflow: "hidden", zIndex: "1",
+    });
+    const img = document.createElement("img");
+    Object.assign(img.style, { width: "100%", height: "100%", objectFit: "cover", display: "block" });
+    img.src = cards[i].src;
+    box.appendChild(img);
+
+    if (CONFIG.debug) {
+      add("div", {
+        left: px + "px", top: py + "px",
+        width: iw + "px", height: ih + "px",
+        outline: "1px solid green", zIndex: "20", pointerEvents: "none",
+      });
+    }
+
+    // Logo — above background (z-index 11)
+    const I2 = CONFIG.image2;
+    const i2box = add("div", {
+      left: (I2.x + i * CONFIG.playerSpacing) + "px", top: I2.y + "px",
+      width: I2.w + "px", height: I2.h + "px", overflow: "hidden", zIndex: "11", outline: debugBorder,
+    });
+    const img2 = document.createElement("img");
+    Object.assign(img2.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+    img2.src = logos[i].src;
+    i2box.appendChild(img2);
+
+    // Name
+    const n = CONFIG.name;
+    const nameY = n.offsetY === "auto" ? ih : n.offsetY;
+    add("div", {
+      left: (px + n.offsetX) + "px", top: (py + nameY) + "px",
+      width: iw + "px", height: n.h + "px",
+      fontSize: n.fontSize + "px", color: i === 0 ? n.color : "#ffffff",
+      fontFamily: n.fontFamily, textAlign: n.textAlign,
+      lineHeight: n.h + "px", fontWeight: n.fontWeight || "bold",
+      textTransform: "uppercase", outline: debugBorder, zIndex: "20",
+    }, { textContent: p.name || "" });
+
+    // Kills
+    const k = CONFIG.kills;
+    const killsY = k.offsetY === "auto" ? ih + n.h : k.offsetY;
+    add("div", {
+      left: (px + k.offsetX) + "px", top: (py + killsY) + "px",
+      width: iw + "px", height: k.h + "px",
+      fontSize: k.fontSize + "px", color: k.color,
+      fontFamily: k.fontFamily, textAlign: k.textAlign,
+      lineHeight: k.h + "px", fontWeight: k.fontWeight || "bold",
+      textTransform: "uppercase", outline: debugBorder, zIndex: "20",
+    }, { textContent: p.kills || "" });
+  }
+
+  return frame;
+}
+
+let renderToken = 0;
+
+async function render(subtitle, players) {
+  const token = ++renderToken;
+  const frame = await buildFrame(subtitle, players);
+  // If a newer fetch cycle finished first, drop this stale frame.
+  if (token !== renderToken) return;
+
+  document.body.appendChild(frame);
+  // Force layout so the browser has the new frame fully painted-ready,
+  // then swap old -> new within the same frame so nothing appears to move.
+  void frame.offsetHeight;
+  requestAnimationFrame(() => {
+    document.querySelectorAll(".dynamic-frame").forEach(el => { if (el !== frame) el.remove(); });
+    frame.style.visibility = "visible";
+  });
+}
+
+async function fetchAndRender() {
+  try {
+    const res = await fetch(DATA_URL);
+    const data = await res.json();
+    const rows = data.values || [];
+
+    const subtitle = (rows[0] || [])[0] || "";
+    const players = [];
+    for (let i = 1; i <= 5; i++) {
+      const row = rows[i] || [];
+      const playerName = row[0] || "";
+      players.push({
+        name:        playerName,
+        kills:       row[1] || "",
+        logo:        logoPath(row[2]),
+        callingCard: playerName ? "Static/PLAYER CALLING CARDS/" + playerName + ".png" : "Static/PLAYER CALLING CARDS/default.png",
+      });
+    }
+    render(subtitle, players);
+  } catch(e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,440 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1920px; height: 1080px; overflow: hidden; }
+  #background {
+    position: absolute; left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    background: url('Static/Lower Leaderboard.png') no-repeat 0 0;
+    background-size: 1920px 1080px;
+    z-index: 0; pointer-events: none;
+  }
+  .content-layer {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+  }
+</style>
+</head>
+<body>
+
+<div id="background"></div>
+<div id="subtitle" style="position:absolute;left:0;top:0;z-index:10;pointer-events:none;"></div>
+<div id="content0" class="content-layer" style="z-index:1;"></div>
+<div id="content1" class="content-layer" style="z-index:1;"></div>
+
+<script>
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const CYCLE_MS = 15000;
+
+const DATA_URL   = "/api/data/lower_leaderboard";
+const REFRESH_MS = 15000;
+
+const CONFIG = {
+  firstPos:   { x: 564, y: 966 },
+  colSpacing: 268,
+
+  nameOffset:    { x: 76,  y: 0 },
+  scoreOffset:   { x: 169, y: 0 },
+  glowOffset:    { x: -564, y: -966 },
+  mainLogoOffset:{ x: 38,   y: 1.5 },
+
+  glow: {
+    w: 1920, h: 1080,
+  },
+
+  mainLogo: {
+    w: 30, h: 30,
+  },
+
+  pos: {
+    w: 30, h: 33,
+    fontSize: 14, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "400",
+    textAlign: "center",
+  },
+
+  name: {
+    w: 85, h: 33,
+    fontSize: 17, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "400",
+    textAlign: "left",
+  },
+
+  score: {
+    w: 75, h: 33,
+    fontSize: 17, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "600",
+    textAlign: "right",
+  },
+
+  subtitle: {
+    x: 300, y: 962, w: 260, h: 42,
+    fontSize: 18, color: "#000",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "center",
+  },
+
+  debug: false,
+};
+
+/* ============================================================
+   RENDERER â€” no need to edit below this line
+   ============================================================ */
+
+const debugBorder = CONFIG.debug ? "1px solid green" : "none";
+const layers = [document.getElementById("content0"), document.getElementById("content1")];
+let activeLayer = 0;
+let currentPage = 0;
+const PAGE_SIZE = 5;
+const TOTAL_PAGES = 4;
+const WIPE_MS     = 500; // entrance/exit duration per slot
+const OUT_WIPE_MS = 500;
+const STAGGER_MS  = 100;  // delay between each slot
+
+/* Preload an image URL, resolving with whichever src actually loaded —
+   the original, or the fallback if the original 404s. Passing this
+   resolved src straight to the real <img> means it never has to fail
+   its own request/rely on onerror before showing the fallback. */
+function preloadImage(src, fallback) {
+  if (!src) return Promise.resolve(fallback || src);
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const finish = (finalSrc) => { if (!settled) { settled = true; resolve(finalSrc); } };
+    const timer = setTimeout(() => finish(fallback || src), 3000);
+    img.onload = () => { clearTimeout(timer); finish(src); };
+    img.onerror = () => {
+      clearTimeout(timer);
+      if (fallback && fallback !== src) preloadImage(fallback).then(finish);
+      else finish(fallback || src);
+    };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) { clearTimeout(timer); finish(src); }
+  });
+}
+
+/* Preloads every image for a page and returns a map of team index ->
+   resolved (guaranteed-loadable) glow/main/matchpoint srcs. */
+async function preloadPageImages(page) {
+  const startIdx = page * PAGE_SIZE;
+  const resolved = {};
+  const work = [
+    // Preload the "empty slot" fallbacks too, so pages with fewer than
+    // PAGE_SIZE real teams don't show a pop-in for the blank columns.
+    preloadImage("Static/LOGOS - BOTTOM BAR GLOW/LOGOS - BOTTOM BAR GLOW/none.png"),
+    preloadImage("Static/LOGOS - MAIN/NONE.png"),
+  ];
+  for (let i = 0; i < PAGE_SIZE; i++) {
+    const team = TEAMS[startIdx + i];
+    if (!team) continue;
+    const entry = {};
+    resolved[i] = entry;
+
+    work.push(preloadImage(
+      "Static/LOGOS - BOTTOM BAR GLOW/LOGOS - BOTTOM BAR GLOW/" + team.logo + ".png",
+      "Static/LOGOS - BOTTOM BAR GLOW/LOGOS - BOTTOM BAR GLOW/none.png"
+    ).then(src => { entry.glowSrc = src; }));
+
+    const mpStatusCheck = (team.mpStatus || "").toLowerCase().trim();
+    const useStatsLogo = mpStatusCheck === "match point on" || mpStatusCheck === "gold on";
+    const logoFolder = useStatsLogo ? "Static/LOGOS - STATS" : "Static/LOGOS - MAIN";
+    const logoFallback = useStatsLogo ? "Static/LOGOS - STATS/NONE.png" : "Static/LOGOS - MAIN/NONE.png";
+    work.push(preloadImage(logoFolder + "/" + team.logo + ".png", logoFallback).then(src => { entry.mainSrc = src; }));
+
+    const mpSrc = mpImagePath(team.mpStatus);
+    if (mpSrc) work.push(preloadImage(mpSrc).then(src => { entry.mpSrc = src; }));
+  }
+  await Promise.all(work);
+  return resolved;
+}
+
+function mpImagePath(status) {
+  const s = (status || "").toLowerCase().trim();
+  if (s === "match point on")  return "Static/LOWER LEADERBOARD MATCH POINT/MATCH POINT ON.png";
+  if (s === "match point off") return "Static/LOWER LEADERBOARD MATCH POINT/MATCH POINT OFF.png";
+  if (s === "gold on")         return "Static/LOWER LEADERBOARD MATCH POINT/GOLD ON.png";
+  if (s === "gold off")        return "Static/LOWER LEADERBOARD MATCH POINT/GOLD OFF.png";
+  return "";
+}
+
+function buildTeamSlot(team, i, startIdx, resolvedForSlot) {
+  const offset  = i * CONFIG.colSpacing;
+  // Wrapper anchored to this team's column â€” clip-path sweeps only this column's width
+  const wrapLeft = CONFIG.firstPos.x + offset;
+  const n = CONFIG.name;
+  const s = CONFIG.score;
+  const p = CONFIG.pos;
+
+  const wrap = document.createElement("div");
+  wrap.className = "team-slot";
+  Object.assign(wrap.style, {
+    position: "absolute",
+    left: wrapLeft + "px",
+    top:  "0px",
+    width:  CONFIG.colSpacing + "px",
+    height: "1080px",
+    clipPath: "inset(0 100% 0 0)",
+  });
+
+  // Glow â€” absolute screen coords translated to be relative to wrap
+  const glowBox = document.createElement("div");
+  const glowScreenX = CONFIG.firstPos.x + CONFIG.glowOffset.x + offset; // = offset (0,268,536â€¦)
+  Object.assign(glowBox.style, {
+    position: "absolute",
+    left: (glowScreenX - wrapLeft) + "px",   // = -firstPos.x = -564
+    top:  (CONFIG.firstPos.y + CONFIG.glowOffset.y) + "px", // = 0
+    width:  CONFIG.glow.w + "px",
+    height: CONFIG.glow.h + "px",
+    overflow: "hidden", zIndex: "3", outline: debugBorder,
+  });
+  const glowImg = document.createElement("img");
+  Object.assign(glowImg.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+  glowImg.src = (resolvedForSlot && resolvedForSlot.glowSrc) || "Static/LOGOS - BOTTOM BAR GLOW/LOGOS - BOTTOM BAR GLOW/none.png";
+  glowBox.appendChild(glowImg);
+  wrap.appendChild(glowBox);
+
+  // Main logo â€” relative to wrap
+  const mainBox = document.createElement("div");
+  Object.assign(mainBox.style, {
+    position: "absolute",
+    left: CONFIG.mainLogoOffset.x + "px",  // (firstPos.x + mainLogoOffset.x + offset) - wrapLeft
+    top:  (CONFIG.firstPos.y + CONFIG.mainLogoOffset.y) + "px",
+    width:  CONFIG.mainLogo.w + "px",
+    height: CONFIG.mainLogo.h + "px",
+    overflow: "hidden", zIndex: "5", outline: debugBorder,
+  });
+  const mainImg = document.createElement("img");
+  Object.assign(mainImg.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+  mainImg.src = (resolvedForSlot && resolvedForSlot.mainSrc) || "Static/LOGOS - MAIN/NONE.png";
+  mainBox.appendChild(mainImg);
+  wrap.appendChild(mainBox);
+
+  // Match point image â€” same offset/size as glow, above glow (z:4)
+  const mpSrc = resolvedForSlot ? resolvedForSlot.mpSrc : null;
+  if (mpSrc) {
+    const mpBox = document.createElement("div");
+    Object.assign(mpBox.style, {
+      position: "absolute",
+      left: (glowScreenX - wrapLeft) + "px",
+      top:  (CONFIG.firstPos.y + CONFIG.glowOffset.y) + "px",
+      width: "1920px", height: "1080px",
+      overflow: "hidden", zIndex: "4",
+    });
+    const mpImg = document.createElement("img");
+    Object.assign(mpImg.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+    mpImg.src = mpSrc;
+    mpBox.appendChild(mpImg);
+    wrap.appendChild(mpBox);
+  }
+
+  const mpStatus = (team ? team.mpStatus : "").toLowerCase().trim();
+  const textColor = (mpStatus === "match point on" || mpStatus === "gold on") ? "#000000" : "#ffffff";
+
+  // Position number â€” from sheet column A, relative to wrap
+  const posEl = document.createElement("div");
+  Object.assign(posEl.style, {
+    position: "absolute",
+    left: "0px",
+    top:  CONFIG.firstPos.y + "px",
+    width: p.w + "px", height: p.h + "px",
+    fontSize: p.fontSize + "px", color: textColor,
+    fontFamily: p.fontFamily, fontWeight: p.fontWeight,
+    textAlign: p.textAlign, lineHeight: p.h + "px",
+    outline: debugBorder, zIndex: "5",
+  });
+  posEl.textContent = team ? team.pos : "";
+  wrap.appendChild(posEl);
+
+  // Team name â€” relative to wrap
+  const nameEl = document.createElement("div");
+  Object.assign(nameEl.style, {
+    position: "absolute",
+    left: CONFIG.nameOffset.x + "px",
+    top:  (CONFIG.firstPos.y + CONFIG.nameOffset.y) + "px",
+    width: n.w + "px", height: n.h + "px",
+    fontSize: n.fontSize + "px", color: textColor,
+    fontFamily: n.fontFamily, fontWeight: n.fontWeight,
+    textAlign: n.textAlign, lineHeight: n.h + "px",
+    textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap",
+    outline: debugBorder, zIndex: "5",
+  });
+  nameEl.textContent = team ? team.name : "";
+  wrap.appendChild(nameEl);
+
+  // Score â€” relative to wrap
+  const scoreEl = document.createElement("div");
+  Object.assign(scoreEl.style, {
+    position: "absolute",
+    left: CONFIG.scoreOffset.x + "px",
+    top:  (CONFIG.firstPos.y + CONFIG.scoreOffset.y) + "px",
+    width: s.w + "px", height: s.h + "px",
+    fontSize: s.fontSize + "px", color: textColor,
+    fontFamily: s.fontFamily, fontWeight: s.fontWeight,
+    textAlign: s.textAlign, lineHeight: s.h + "px",
+    overflow: "hidden", whiteSpace: "nowrap",
+    outline: debugBorder, zIndex: "5",
+  });
+  scoreEl.textContent = team ? team.score : "";
+  wrap.appendChild(scoreEl);
+
+  return wrap;
+}
+
+function renderInto(container, page, resolved) {
+  container.innerHTML = "";
+  const startIdx = page * PAGE_SIZE;
+  for (let i = 0; i < PAGE_SIZE; i++) {
+    container.appendChild(buildTeamSlot(TEAMS[startIdx + i], i, startIdx, resolved ? resolved[i] : null));
+  }
+}
+
+function slots(container) {
+  return Array.from(container.querySelectorAll(".team-slot"));
+}
+
+function revealSlots(container) {
+  slots(container).forEach((wrap, i) => {
+    wrap.style.transition = `clip-path ${WIPE_MS}ms ease-in-out ${i * STAGGER_MS}ms`;
+    wrap.style.clipPath = "inset(0 0% 0 0)";
+  });
+}
+
+function showSlotsInstant(container) {
+  slots(container).forEach(wrap => {
+    wrap.style.transition = "none";
+    wrap.style.clipPath = "inset(0 0% 0 0)";
+  });
+}
+
+function exitSlots(container) {
+  slots(container).forEach((wrap, i) => {
+    wrap.style.transition = `clip-path ${OUT_WIPE_MS}ms ease-in-out ${i * STAGGER_MS}ms`;
+    wrap.style.clipPath = "inset(0 0% 0 100%)";
+  });
+}
+
+async function cycle() {
+  const incoming = layers[1 - activeLayer];
+  const outgoing = layers[activeLayer];
+  const page = currentPage;
+
+  const resolved = await preloadPageImages(page);
+
+  // Render incoming while hidden
+  renderInto(incoming, page, resolved);
+
+  outgoing.style.zIndex = "2";
+  incoming.style.zIndex = "1";
+
+  // Force reflow then fire both simultaneously
+  outgoing.offsetWidth;
+  exitSlots(outgoing);
+  revealSlots(incoming);
+
+  const totalDuration = WIPE_MS + (PAGE_SIZE - 1) * STAGGER_MS;
+  setTimeout(() => {
+    slots(outgoing).forEach(wrap => {
+      wrap.style.transition = "none";
+      wrap.style.clipPath = "inset(0 100% 0 0)";
+    });
+    activeLayer = 1 - activeLayer;
+  }, totalDuration);
+
+  currentPage = (currentPage + 1) % TOTAL_PAGES;
+}
+
+// Subtitle element â€” no animation, always on top
+const subtitleEl = document.getElementById("subtitle");
+const ST = CONFIG.subtitle;
+Object.assign(subtitleEl.style, {
+  left: ST.x + "px", top: ST.y + "px",
+  width: ST.w + "px", height: ST.h + "px",
+  fontSize: ST.fontSize + "px", color: "#ffffff",
+  fontFamily: ST.fontFamily, fontWeight: ST.fontWeight,
+  textAlign: ST.textAlign,
+  textTransform: "uppercase",
+  whiteSpace: "normal", wordBreak: "break-word",
+  lineHeight: "1.2em", padding: "4px 6px",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  boxSizing: "border-box",
+});
+
+function fitSubtitle(text) {
+  subtitleEl.textContent = text;
+  const maxH = ST.h; // max 45px
+  let size = ST.fontSize;
+  subtitleEl.style.fontSize = size + "px";
+  while (subtitleEl.scrollHeight > maxH && size > 8) {
+    size -= 0.5;
+    subtitleEl.style.fontSize = size + "px";
+  }
+}
+
+let TEAMS = [];
+let cycleInterval = null;
+
+async function startCycle() {
+  if (cycleInterval) return;
+  cycleInterval = -1; // guard against re-entrant calls while preloading
+  const page = currentPage;
+  const resolved = await preloadPageImages(page);
+  layers[activeLayer].style.zIndex = "2";
+  layers[1 - activeLayer].style.zIndex = "1";
+  renderInto(layers[activeLayer], page, resolved);
+  showSlotsInstant(layers[activeLayer]);
+  currentPage = (currentPage + 1) % TOTAL_PAGES;
+  cycleInterval = setInterval(cycle, CYCLE_MS);
+}
+
+async function fetchAndRender() {
+  try {
+    const res  = await fetch(DATA_URL);
+    const data = await res.json();
+    const rows = data.values || [];
+
+    const header = rows[0] || [];
+    // A1 = subtitle text
+    fitSubtitle(header[0] || "");
+    // B1â€“F1 stored for future use
+    const headerB = header[1] || "";
+    const headerC = header[2] || "";
+    const headerD = header[3] || "";
+    const headerE = header[4] || "";
+    const headerF = header[5] || "";
+
+    // Rows 2â€“17: A=pos, B=name, C=helper(skip), D=score, E=logo, F=mpStatus
+    TEAMS = [];
+    for (let i = 1; i <= 16; i++) {
+      const r = rows[i] || [];
+      TEAMS.push({
+        pos:      r[0] || "",
+        name:     r[1] || "",
+        score:    r[3] || "",
+        logo:     r[4] || "",
+        mpStatus: r[5] || "",
+      });
+    }
+
+    startCycle();
+  } catch(e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+
+</script>
+
+</body>
+</html>
+

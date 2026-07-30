@@ -1,0 +1,383 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; font-style: italic; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT_ITALIC.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; font-style: italic; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR_ITALIC.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; font-style: italic; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD_ITALIC.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; font-style: italic; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD_ITALIC.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+  }
+  #background {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    background: url('Static/Main Leaderboard.png') no-repeat 0 0;
+    background-size: 1920px 1080px;
+    z-index: 0;
+    pointer-events: none;
+  }
+  #winners {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    background-size: 1920px 1080px;
+    background-repeat: no-repeat;
+    background-position: 0 0;
+    z-index: 2;
+    pointer-events: none;
+    display: none;
+  }
+  #matchpoint {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    background-size: 1920px 1080px;
+    background-repeat: no-repeat;
+    background-position: 0 0;
+    z-index: 1;
+    pointer-events: none;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="background"></div>
+<div id="matchpoint"></div>
+<div id="winners"></div>
+<div id="content"></div>
+
+<script>
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const DATA_URL   = "/api/data/main_leaderboard";
+const REFRESH_MS = 15000;
+
+const CONFIG = {
+
+  firstRow:     { x: 187, y: 208 },
+  rowSpacing:   103,
+  columnOffset: 871,
+
+  orgLogo: {
+    offsetX: 0, offsetY: 8,
+    w: 70, h: 70,
+  },
+
+  loadingSymbol: {
+    offsetX: 552, offsetY: 29,
+    w: 25, h: 25,
+  },
+
+  teamName: {
+    offsetX: 88, offsetY: 12,
+    w: 401, h: 27,
+    fontSize: 22, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "600",
+    textAlign: "left",
+  },
+
+  playerNames: {
+    offsetX: 88, offsetY: 46,
+    w: 448, h: 27,
+    fontSize: 18, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "left",
+  },
+
+  score: {
+    offsetX: 587, offsetY: 20,
+    w: 159, h: 44,
+    fontSize: 36, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "center",
+  },
+
+  subtitle: {
+    x: 100, y: 123, w: 717, h: 28,
+    fontSize: 22, color: "#F0F046",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "left",
+  },
+
+  previous: {
+    x: 142, y: 1035, w: 383, h: 28,
+    fontSize: 14, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "left",
+  },
+
+  next: {
+    x: 1351, y: 1035, w: 432, h: 28,
+    fontSize: 14, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "right",
+  },
+
+  debug: false,
+};
+
+/* ============================================================
+   RENDERER — no need to edit below this line
+   ============================================================ */
+
+const debugBorder = CONFIG.debug ? "1px solid green" : "none";
+const content = document.getElementById("content");
+
+/* Preload an image URL, resolving with whichever src actually loaded —
+   the original, or the fallback if the original 404s (or the fallback
+   itself, if that's the only thing supplied and it fails too). Passing
+   this resolved src straight to the real <img> means the visible element
+   never has to fail its own request/rely on onerror to fall back. */
+function preloadImage(src, fallback) {
+  if (!src) return Promise.resolve(fallback || src);
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const finish = (finalSrc) => { if (!settled) { settled = true; resolve(finalSrc); } };
+    const timer = setTimeout(() => finish(fallback || src), 3000);
+    img.onload = () => { clearTimeout(timer); finish(src); };
+    img.onerror = () => {
+      clearTimeout(timer);
+      if (fallback && fallback !== src) preloadImage(fallback).then(finish);
+      else finish(fallback || src);
+    };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) { clearTimeout(timer); finish(src); }
+  });
+}
+
+function logoFromName(name, useStats) {
+  const folder = useStats ? "Static/LOGOS - STATS" : "Static/LOGOS - MAIN";
+  if (!name || name === "null") return folder + "/DEFAULT.png";
+  return folder + "/" + name + ".png";
+}
+
+function loadingFromName(name) {
+  if (!name || name === "null") return "";
+  return "Static/MAIN LEADERBOARD LOADING SYMBOLS/" + name + ".png";
+}
+
+const mpDiv      = document.getElementById("matchpoint");
+const winnersDiv = document.getElementById("winners");
+
+async function buildFrame(subtitle, previous, next, teams, mpCount, winnersText) {
+  const mpImageUrl = mpCount > 0
+    ? "Static/MAIN LEADERBOARD MATCH POINT/" + mpCount + " ABOVE MATCH POINT.png"
+    : null;
+
+  const wt = (winnersText || "").trim().toUpperCase();
+  const winnersImageUrl = wt === "WINNERS" ? "Static/MAIN LEADERBOARD WINNERS/winners.png"
+    : wt === "NO WINNERS" ? "Static/MAIN LEADERBOARD WINNERS/no winners.png"
+    : null;
+
+  // Preload every image this frame needs before touching the DOM, and
+  // resolve each to whichever src (target or fallback) actually loaded.
+  const preloads = [];
+  if (mpImageUrl) preloads.push(preloadImage(mpImageUrl));
+  if (winnersImageUrl) preloads.push(preloadImage(winnersImageUrl));
+
+  const logoTargets = teams.map((team, i) => {
+    const useStats = i < mpCount;
+    return { target: logoFromName(team.logoName, useStats), fallback: (useStats ? "Static/LOGOS - STATS" : "Static/LOGOS - MAIN") + "/DEFAULT.png" };
+  });
+  const symTargets = teams.map((team, i) => {
+    const onMP = i < mpCount;
+    const symName = (onMP && team.loadingSymbolName === "TBD") ? "MPTBD" : team.loadingSymbolName;
+    return { target: loadingFromName(symName), fallback: "" };
+  });
+
+  const [logoSrcs, symSrcs] = await Promise.all([
+    Promise.all(logoTargets.map(t => preloadImage(t.target, t.fallback))),
+    Promise.all(symTargets.map(t => preloadImage(t.target, t.fallback))),
+    ...preloads,
+  ]);
+
+  const frame = document.createElement("div");
+  frame.style.position = "absolute";
+  frame.style.left = "0"; frame.style.top = "0";
+
+  function makeEl(tag, styles, extra) {
+    const el = document.createElement(tag);
+    Object.assign(el.style, { position: "absolute", ...styles });
+    if (extra) Object.assign(el, extra);
+    frame.appendChild(el);
+    return el;
+  }
+
+  // Subtitle, previous, next
+  [
+    { cfg: CONFIG.subtitle, text: subtitle },
+    { cfg: CONFIG.previous, text: previous },
+    { cfg: CONFIG.next,     text: next     },
+  ].forEach(({ cfg, text }) => {
+    makeEl("div", {
+      left: cfg.x + "px", top: cfg.y + "px",
+      width: cfg.w + "px", height: cfg.h + "px",
+      fontSize: cfg.fontSize + "px", color: cfg.color,
+      fontFamily: cfg.fontFamily, fontWeight: cfg.fontWeight,
+      textTransform: "uppercase",
+      display: "flex", alignItems: "center",
+      justifyContent: cfg.textAlign === "right" ? "flex-end" : "flex-start",
+      outline: debugBorder, zIndex: "3",
+    }, { textContent: text });
+  });
+
+  teams.forEach((team, i) => {
+    const onMP     = i < mpCount;
+    const textColor = onMP ? "#000000" : "#ffffff";
+    const col = i < 8 ? 0 : 1;
+    const row = i % 8;
+    const ax  = CONFIG.firstRow.x + col * CONFIG.columnOffset;
+    const ay  = CONFIG.firstRow.y + row * CONFIG.rowSpacing;
+
+    // Org logo (use STATS folder when on match point)
+    const L = CONFIG.orgLogo;
+    const logoBox = document.createElement("div");
+    Object.assign(logoBox.style, {
+      position: "absolute",
+      left: (ax + L.offsetX) + "px", top: (ay + L.offsetY) + "px",
+      width: L.w + "px", height: L.h + "px",
+      overflow: "hidden", zIndex: "3", outline: debugBorder,
+    });
+    frame.appendChild(logoBox);
+    const logoImg = document.createElement("img");
+    Object.assign(logoImg.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+    logoImg.src = logoSrcs[i];
+    logoBox.appendChild(logoImg);
+
+    // Loading symbol (small logo)
+    const L2 = CONFIG.loadingSymbol;
+    const symBox = document.createElement("div");
+    Object.assign(symBox.style, {
+      position: "absolute",
+      left: (ax + L2.offsetX) + "px", top: (ay + L2.offsetY) + "px",
+      width: L2.w + "px", height: L2.h + "px",
+      overflow: "hidden", zIndex: "3", outline: debugBorder,
+    });
+    frame.appendChild(symBox);
+    // Only attach an <img> when there's an actual symbol to show — an
+    // empty src makes the browser try (and fail) to load the page itself
+    // as an image, producing a visible broken-image icon.
+    if (symSrcs[i]) {
+      const symImg = document.createElement("img");
+      Object.assign(symImg.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+      symImg.src = symSrcs[i];
+      symBox.appendChild(symImg);
+    }
+
+    // Team name
+    const TN = CONFIG.teamName;
+    makeEl("div", {
+      left: (ax + TN.offsetX) + "px", top: (ay + TN.offsetY) + "px",
+      width: TN.w + "px", height: TN.h + "px",
+      fontSize: TN.fontSize + "px", color: textColor,
+      fontFamily: TN.fontFamily, fontWeight: TN.fontWeight,
+      textAlign: TN.textAlign, lineHeight: TN.h + "px",
+      textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap",
+      outline: debugBorder, zIndex: "3",
+    }, { textContent: team.teamName });
+
+    // Player names
+    const PN = CONFIG.playerNames;
+    makeEl("div", {
+      left: (ax + PN.offsetX) + "px", top: (ay + PN.offsetY) + "px",
+      width: PN.w + "px", height: PN.h + "px",
+      fontSize: PN.fontSize + "px", color: textColor,
+      fontFamily: PN.fontFamily, fontWeight: PN.fontWeight,
+      textAlign: PN.textAlign, lineHeight: PN.h + "px",
+      overflow: "hidden", whiteSpace: "nowrap",
+      outline: debugBorder, zIndex: "3",
+    }, { textContent: team.playerNames });
+
+    // Score
+    const SC = CONFIG.score;
+    makeEl("div", {
+      left: (ax + SC.offsetX) + "px", top: (ay + SC.offsetY) + "px",
+      width: SC.w + "px", height: SC.h + "px",
+      fontSize: SC.fontSize + "px", color: textColor,
+      fontFamily: SC.fontFamily, fontWeight: SC.fontWeight,
+      textAlign: SC.textAlign, lineHeight: SC.h + "px",
+      outline: debugBorder, zIndex: "3",
+    }, { textContent: team.score });
+  });
+
+  return { frame, mpImageUrl, winnersImageUrl };
+}
+
+let renderToken = 0;
+
+async function render(subtitle, previous, next, teams, mpCount, winnersText) {
+  const token = ++renderToken;
+  const { frame, mpImageUrl, winnersImageUrl } = await buildFrame(subtitle, previous, next, teams, mpCount, winnersText);
+  if (token !== renderToken) return;
+
+  if (mpImageUrl) {
+    mpDiv.style.backgroundImage = "url('" + mpImageUrl + "')";
+    mpDiv.style.display = "block";
+  } else {
+    mpDiv.style.display = "none";
+  }
+
+  if (winnersImageUrl) {
+    winnersDiv.style.backgroundImage = "url('" + winnersImageUrl + "')";
+    winnersDiv.style.display = "block";
+  } else {
+    winnersDiv.style.display = "none";
+  }
+
+  content.innerHTML = "";
+  content.appendChild(frame);
+}
+
+async function fetchAndRender() {
+  try {
+    const res = await fetch(DATA_URL);
+    const data = await res.json();
+    const rows = data.values || [];
+
+    const subtitle   = (rows[0] || [])[0] || "";
+    const previous   = (rows[0] || [])[1] || "";
+    const next       = (rows[0] || [])[2] || "";
+    const threshold  = parseFloat((rows[0] || [])[3]) || Infinity;
+    const winnersText = (rows[0] || [])[4] || "";
+
+    const teams = [];
+    for (let i = 1; i <= 16; i++) {
+      const row = rows[i] || [];
+      teams.push({
+        teamName:      row[0] || "",
+        playerNames:   row[1] || "",
+        score:         row[2] || "",
+        logoName:      row[3] || "",
+        loadingSymbolName: row[4] || "",
+      });
+    }
+
+    const mpCount = teams.filter(t => parseFloat(t.score) >= threshold).length;
+
+    render(subtitle, previous, next, teams, mpCount, winnersText);
+  } catch(e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+</script>
+
+</body>
+</html>
+

@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+  .content-layer {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+  }
+</style>
+</head>
+<body>
+
+<div id="grey-box" style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:url('Static/grey_box.png') no-repeat 0 0;background-size:1920px 1080px;z-index:-1;pointer-events:none;"></div>
+<div id="dividers" style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:url('Static/5_DIVDERS.png') no-repeat 0 0;background-size:1920px 1080px;z-index:0;pointer-events:none;"></div>
+<div id="content0" class="content-layer" style="z-index:1;"></div>
+<div id="content1" class="content-layer" style="z-index:1;"></div>
+
+<script>
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const DATA_URL   = "/api/data/lower_stats";
+const REFRESH_MS = 15000;
+
+const CYCLE_MS    = 15000;
+const WIPE_MS     = 750;
+const OUT_WIPE_MS = 750;
+const STAGGER_MS  = 0;
+
+const CONFIG = {
+  firstPos:   { x: 571, y: 1008 },
+  colSpacing: 268,
+
+  // Page 1 — player calling cards
+  playerPic: { x: 0, y: 0, w: 86, h: 72 },
+  playerTop: { x: 100, y: 7,  w: 192, h: 20, fontSize: 14},
+  playerMid: { x: 100, y: 27, w: 192, h: 18, fontSize: 11},
+  playerBot: { x: 100, y: 45, w: 192, h: 18, fontSize: 11},
+
+  // Page 2 — org logos
+  logoPic:   { x: 12, y: 7,  w: 56, h: 56 },
+  logoTop:   { x: 81, y: 7,  w: 192, h: 20, fontSize: 14},
+  logoMid:   { x: 81, y: 27, w: 192, h: 18, fontSize: 11},
+  logoBot:   { x: 81, y: 45, w: 192, h: 18, fontSize: 11},
+
+  textColor:  "#ffffff",
+  fontFamily: "GeomGraphic, sans-serif",
+
+  debug: false,
+};
+
+/* ============================================================
+   DATA — populated from sheet
+   ============================================================ */
+
+let PAGE1 = [];
+let PAGE2 = [];
+let headerA1 = "";
+let headerB1 = "";
+
+/* ============================================================
+   SLOT BUILDERS
+   ============================================================ */
+
+const debugBorder = CONFIG.debug ? "1px solid green" : "none";
+
+/* Preload an image URL, resolving with whichever src actually loaded —
+   the original, or the fallback if the original 404s. Passing this
+   resolved src straight to the real <img> means it never has to fail
+   its own request before falling back, so there's no visible delay. */
+function preloadImage(src, fallback) {
+  if (!src) return Promise.resolve(fallback || src);
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const finish = (finalSrc) => { if (!settled) { settled = true; resolve(finalSrc); } };
+    const timer = setTimeout(() => finish(fallback || src), 3000);
+    img.onload = () => { clearTimeout(timer); finish(src); };
+    img.onerror = () => {
+      clearTimeout(timer);
+      if (fallback && fallback !== src) preloadImage(fallback).then(finish);
+      else finish(fallback || src);
+    };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) { clearTimeout(timer); finish(src); }
+  });
+}
+
+/* Preloads every image for a page and returns the page's entry list with
+   each entry's `pic` swapped for the resolved (guaranteed-loadable) src. */
+async function preloadPage(page) {
+  const list = page === 0 ? PAGE1 : PAGE2;
+  const fallback = page === 0 ? "Static/PLAYER HEADSHOTS/default.png" : "Static/LOGOS - MAIN/NONE.png";
+  const resolvedSrcs = await Promise.all(list.map(entry => preloadImage(entry ? entry.pic : "", fallback)));
+  return list.map((entry, i) => entry ? { ...entry, pic: resolvedSrcs[i] } : entry);
+}
+
+function makeWrap(i) {
+  const wrap = document.createElement("div");
+  wrap.className = "team-slot";
+  Object.assign(wrap.style, {
+    position: "absolute",
+    left:   (CONFIG.firstPos.x + i * CONFIG.colSpacing) + "px",
+    top:    "0px",
+    width:  CONFIG.colSpacing + "px",
+    height: "1080px",
+    transform: "translateY(1080px)",
+  });
+  return wrap;
+}
+
+function makeImg(src, picCfg, fallback) {
+  const box = document.createElement("div");
+  Object.assign(box.style, {
+    position: "absolute",
+    left:   picCfg.x + "px",
+    top:    (CONFIG.firstPos.y + picCfg.y) + "px",
+    width:  picCfg.w + "px",
+    height: picCfg.h + "px",
+    overflow: "hidden", zIndex: "2", outline: debugBorder,
+  });
+  const img = document.createElement("img");
+  Object.assign(img.style, { width: "100%", height: "100%", objectFit: "cover", display: "block" });
+  img.src = src || "";
+  img.onerror = () => { img.src = fallback; img.onerror = null; };
+  box.appendChild(img);
+  return box;
+}
+
+function makeText(textCfg, value) {
+  const el = document.createElement("div");
+  Object.assign(el.style, {
+    position: "absolute",
+    left: textCfg.x + "px", top: (CONFIG.firstPos.y + textCfg.y) + "px",
+    width: textCfg.w + "px", height: textCfg.h + "px",
+    fontSize: textCfg.fontSize + "px", color: CONFIG.textColor,
+    fontFamily: CONFIG.fontFamily, fontWeight: textCfg.fontWeight,
+    textAlign: "left", lineHeight: textCfg.h + "px",
+    textTransform: "uppercase", overflow: "hidden", whiteSpace: "nowrap",
+    outline: debugBorder, zIndex: "3",
+  });
+  el.textContent = value || "";
+  return el;
+}
+
+function buildPlayerSlot(player, i) {
+  const wrap = makeWrap(i);
+  wrap.appendChild(makeImg(player ? player.pic : "", CONFIG.playerPic, "Static/PLAYER HEADSHOTS/default.png"));
+  wrap.appendChild(makeText(CONFIG.playerTop, player ? player.top : ""));
+  wrap.appendChild(makeText(CONFIG.playerMid, player ? player.mid : ""));
+  wrap.appendChild(makeText(CONFIG.playerBot, player ? player.bot : ""));
+  return wrap;
+}
+
+function buildLogoSlot(entry, i) {
+  const wrap = makeWrap(i);
+  wrap.appendChild(makeImg(entry ? entry.pic : "", CONFIG.logoPic, "Static/LOGOS - MAIN/NONE.png"));
+  wrap.appendChild(makeText(CONFIG.logoTop, entry ? entry.top : ""));
+  wrap.appendChild(makeText(CONFIG.logoMid, entry ? entry.mid : ""));
+  wrap.appendChild(makeText(CONFIG.logoBot, entry ? entry.bot : ""));
+  return wrap;
+}
+
+/* ============================================================
+   ANIMATION ENGINE
+   ============================================================ */
+
+const layers = [document.getElementById("content0"), document.getElementById("content1")];
+let activeLayer = 0;
+let currentPage = 0;
+const TOTAL_PAGES = 2;
+const PAGE_SIZE   = 5;
+
+function renderInto(container, page, resolvedList) {
+  container.innerHTML = "";
+  container.appendChild(buildTitleSlot(page));
+  const list = resolvedList || (page === 0 ? PAGE1 : PAGE2);
+  if (page === 0) {
+    for (let i = 0; i < PAGE_SIZE; i++) container.appendChild(buildPlayerSlot(list[i] || null, i));
+  } else {
+    for (let i = 0; i < PAGE_SIZE; i++) container.appendChild(buildLogoSlot(list[i] || null, i));
+  }
+}
+
+function slots(container) {
+  return Array.from(container.querySelectorAll(".team-slot"));
+}
+
+function buildTitleSlot(page) {
+  const wrap = document.createElement("div");
+  wrap.className = "team-slot";
+  Object.assign(wrap.style, {
+    position: "absolute",
+    left: "302px", top: "0px",
+    width: "255px", height: "1080px",
+    transform: "translateY(1080px)",
+  });
+  const el = document.createElement("div");
+  Object.assign(el.style, {
+    position: "absolute",
+    left: "0px", top: "1005px",
+    width: "255px", height: "75px",
+    display: "flex", alignItems: "center", justifyContent: "flex-start",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "600",
+    fontSize: "18px", color: "#ffffff",
+    textTransform: "uppercase", boxSizing: "border-box",
+  });
+  el.textContent = page === 0 ? headerA1 : headerB1;
+  wrap.appendChild(el);
+  return wrap;
+}
+
+function revealSlots(container) {
+  slots(container).forEach((wrap, i) => {
+    wrap.style.transition = `transform ${WIPE_MS}ms ease-in-out ${i * STAGGER_MS}ms`;
+    wrap.style.transform = "translateY(0)";
+  });
+}
+
+function exitSlots(container) {
+  slots(container).forEach((wrap, i) => {
+    wrap.style.transition = `transform ${OUT_WIPE_MS}ms ease-in-out ${i * STAGGER_MS}ms`;
+    wrap.style.transform = "translateY(1080px)";
+  });
+}
+
+function showSlotsInstant(container) {
+  slots(container).forEach(wrap => {
+    wrap.style.transition = "none";
+    wrap.style.transform = "translateY(0)";
+  });
+}
+
+async function cycle() {
+  const incoming = layers[1 - activeLayer];
+  const outgoing = layers[activeLayer];
+  const page = currentPage;
+
+  const resolvedList = await preloadPage(page);
+
+  renderInto(incoming, page, resolvedList);
+
+  outgoing.style.zIndex = "2";
+  incoming.style.zIndex = "1";
+
+  outgoing.offsetWidth;
+  exitSlots(outgoing);
+  revealSlots(incoming);
+
+  const totalDuration = WIPE_MS + (PAGE_SIZE - 1) * STAGGER_MS;
+  setTimeout(() => {
+    slots(outgoing).forEach(wrap => {
+      wrap.style.transition = "none";
+      wrap.style.transform = "translateY(1080px)";
+    });
+    activeLayer = 1 - activeLayer;
+  }, totalDuration);
+
+  currentPage = (currentPage + 1) % TOTAL_PAGES;
+}
+
+let cycleInterval = null;
+
+async function startCycle() {
+  if (cycleInterval) return;
+  cycleInterval = -1; // guard against re-entrant calls while preloading
+  const page = currentPage;
+  const resolvedList = await preloadPage(page);
+  layers[activeLayer].style.zIndex = "2";
+  layers[1 - activeLayer].style.zIndex = "1";
+  renderInto(layers[activeLayer], page, resolvedList);
+  showSlotsInstant(layers[activeLayer]);
+  currentPage = (currentPage + 1) % TOTAL_PAGES;
+  cycleInterval = setInterval(cycle, CYCLE_MS);
+}
+
+function parseRow(row) {
+  return {
+    top: row[0] || "",
+    mid: row[1] || "",
+    bot: row[2] || "",
+    img: row[3] || "",
+  };
+}
+
+async function fetchAndRender() {
+  try {
+    const res  = await fetch(DATA_URL);
+    const data = await res.json();
+    const rows = data.values || [];
+
+    const header = rows[0] || [];
+    headerA1 = header[0] || "";
+    headerB1 = header[1] || "";
+
+    PAGE1 = [];
+    for (let i = 1; i <= 5; i++) {
+      const r = parseRow(rows[i] || []);
+      PAGE1.push({ pic: "Static/PLAYER HEADSHOTS/" + r.img + ".png", top: r.top, mid: r.mid, bot: r.bot });
+    }
+
+    PAGE2 = [];
+    for (let i = 6; i <= 10; i++) {
+      const r = parseRow(rows[i] || []);
+      PAGE2.push({ pic: "Static/LOGOS - MAIN/" + r.img + ".png", top: r.top, mid: r.mid, bot: r.bot });
+    }
+
+    startCycle();
+  } catch(e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+
+</script>
+
+</body>
+</html>

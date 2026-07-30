@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+</style>
+</head>
+<body>
+
+<div id="clip-box" style="position:absolute;right:10px;top:10px;width:1100px;height:54px;overflow:hidden;">
+  <div id="card0" style="position:absolute;left:0;top:0;width:100%;height:100%;"></div>
+  <div id="card1" style="position:absolute;left:0;top:0;width:100%;height:100%;"></div>
+</div>
+
+<script>
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const DATA_URL   = "/api/data/top_bar_info";
+const REFRESH_MS = 15000;
+
+const CYCLE_MS    = 10000;
+const WIPE_MS     = 600;
+const OUT_WIPE_MS = 600;
+
+const CONFIG = {
+  // Top-right corner of the card
+  right:  10,   // px from right edge (1920 - 1910 = 10)
+  top:    10,   // px from top
+  height: 54,   // matches apps.png height
+  width:  1000,  // adjust as needed
+
+  fontSize:   14,
+  fontFamily: "GeomGraphic, sans-serif",
+  color:      "#ffffff",
+
+  appsImg:    "Static/apps.png",
+  appsW:      210,
+  appsH:      54,
+};
+
+/* ============================================================
+   DATA
+   ============================================================ */
+
+let cards = ["", "", ""];
+let cycleInterval = null;
+let currentCard = 0;
+const TOTAL_CARDS = 3;
+
+/* ============================================================
+   CARD BUILDERS
+   ============================================================ */
+
+const layers = [document.getElementById("card0"), document.getElementById("card1")];
+let activeLayer = 0;
+
+function applyCardStyle(el) {
+  Object.assign(el.style, {
+    position:  "absolute",
+    left:      "0",
+    top:       "0",
+    width:     "100%",
+    height:    "100%",
+    display:   "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    transform: "translateY(-54px)",
+  });
+}
+
+function buildCard(index) {
+  const el = document.createElement("div");
+  applyCardStyle(el);
+
+  if (index === 2) {
+    // Text + apps.png inline
+    const text = document.createElement("span");
+    Object.assign(text.style, {
+      fontFamily:    CONFIG.fontFamily,
+      fontSize:      CONFIG.fontSize + "px",
+      color:         CONFIG.color,
+      textTransform: "uppercase",
+      whiteSpace:    "nowrap",
+      marginRight:   "8px",
+    });
+    text.textContent = cards[index];
+
+    const img = document.createElement("img");
+    Object.assign(img.style, {
+      width:  CONFIG.appsW + "px",
+      height: CONFIG.appsH + "px",
+      objectFit: "contain",
+      flexShrink: "0",
+    });
+    img.src = CONFIG.appsImg;
+
+    el.appendChild(text);
+    el.appendChild(img);
+  } else {
+    const text = document.createElement("span");
+    Object.assign(text.style, {
+      fontFamily:    CONFIG.fontFamily,
+      fontSize:      CONFIG.fontSize + "px",
+      color:         CONFIG.color,
+      textTransform: "uppercase",
+      whiteSpace:    "nowrap",
+      marginRight:   "10px",
+    });
+    text.textContent = cards[index];
+    el.appendChild(text);
+  }
+
+  return el;
+}
+
+/* ============================================================
+   ANIMATION
+   ============================================================ */
+
+function renderInto(container, index) {
+  container.innerHTML = "";
+  container.appendChild(buildCard(index));
+}
+
+function getCard(container) {
+  return container.firstElementChild;
+}
+
+function revealCard(container) {
+  const card = getCard(container);
+  if (!card) return;
+  card.style.transition = "none";
+  card.style.transform = "translateY(-54px)";
+  card.offsetWidth;
+  card.style.transition = `transform ${WIPE_MS}ms ease-in-out`;
+  card.style.transform = "translateY(0)";
+}
+
+function exitCard(container) {
+  const card = getCard(container);
+  if (!card) return;
+  card.style.transition = `transform ${OUT_WIPE_MS}ms ease-in-out`;
+  card.style.transform = "translateY(54px)";
+}
+
+function showCardInstant(container) {
+  const card = getCard(container);
+  if (!card) return;
+  card.style.transition = "none";
+  card.style.transform = "translateY(0)";
+}
+
+function cycle() {
+  const incoming = layers[1 - activeLayer];
+  const outgoing = layers[activeLayer];
+
+  renderInto(incoming, currentCard);
+
+  outgoing.style.zIndex = "1";
+  incoming.style.zIndex = "2";
+
+  outgoing.offsetWidth;
+  exitCard(outgoing);
+  revealCard(incoming);
+
+  setTimeout(() => {
+    outgoing.innerHTML = "";
+    activeLayer = 1 - activeLayer;
+  }, OUT_WIPE_MS);
+
+  currentCard = (currentCard + 1) % TOTAL_CARDS;
+}
+
+function startCycle() {
+  if (cycleInterval) return;
+  renderInto(layers[activeLayer], currentCard);
+  showCardInstant(layers[activeLayer]);
+  currentCard = (currentCard + 1) % TOTAL_CARDS;
+  cycleInterval = setInterval(cycle, CYCLE_MS);
+}
+
+/* ============================================================
+   SHEET FETCH
+   ============================================================ */
+
+async function fetchAndRender() {
+  try {
+    const res  = await fetch(DATA_URL);
+    const data = await res.json();
+    const rows = data.values || [];
+    cards[0] = (rows[0] || [])[0] || "";
+    cards[1] = (rows[1] || [])[0] || "";
+    cards[2] = (rows[2] || [])[0] || "";
+    startCycle();
+  } catch(e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+
+</script>
+</body>
+</html>

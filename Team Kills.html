@@ -1,0 +1,259 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+  }
+  #background {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1920px; height: 1080px;
+    background: url('Static/Team Kills.png') no-repeat 0 0;
+    background-size: 1920px 1080px;
+    z-index: 10;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="background"></div>
+<div id="content"></div>
+
+<script>
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const DATA_URL   = "/api/data/team_kills";
+const REFRESH_MS = 15000;
+
+const CONFIG = {
+
+  playerCount: 5,
+
+  /* --- First team logo: absolute position & size --- */
+  image: {
+    x: 62, y: 373, w: 300, h: 300,
+  },
+
+  /* --- Gap between each player column (px) --- */
+  playerSpacing: 373,
+
+  /* --- Player names label --- */
+  name: {
+    offsetX: -34, offsetY: 382,
+    w: 373, h: 151,
+    fontSize: 28, color: "#000000",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "400",
+    textAlign: "center",
+  },
+
+  /* --- Kill count label --- */
+  kills: {
+    offsetX: -34, offsetY: 533,
+    w: 373, h: 46,
+    fontSize: 24, color: "#ffffff",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+    textAlign: "center",
+  },
+
+  /* --- Subtitle text box --- */
+  staticText: {
+    x: 96, y: 149, w: 1728, h: 25,
+    fontSize: 22, color: "#F0F046",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "300",
+  },
+
+  /* --- Team name label --- */
+  label: {
+    x: 44, y: 263, w: 340, h: 21,
+    fontSize: 20, color: "#000000",
+    fontFamily: "GeomGraphic, sans-serif", fontWeight: "400",
+  },
+
+  debug: false,
+};
+
+/* ============================================================
+   RENDERER — no need to edit below this line
+   ============================================================ */
+
+const debugBorder = CONFIG.debug ? "1px solid green" : "none";
+const content = document.getElementById("content");
+
+function logoPath(name) {
+  if (!name || name === "null" || name === "DEFAULT") return "Static/LOGOS - STATS/DEFAULT.png";
+  return "Static/LOGOS - STATS/" + name + ".png";
+}
+
+/* Preload an image URL, resolving once it has actually loaded (or after
+   a timeout / error, so one bad URL can never block the whole swap). */
+function preloadImage(src, fallback) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const finish = (finalSrc) => {
+      if (settled) return;
+      settled = true;
+      resolve(finalSrc);
+    };
+    const timer = setTimeout(() => finish(img.src || fallback || src), 3000);
+    img.onload = () => { clearTimeout(timer); finish(src); };
+    img.onerror = () => {
+      clearTimeout(timer);
+      if (fallback && src !== fallback) {
+        preloadImage(fallback, null).then(finish);
+      } else {
+        finish(fallback || src);
+      }
+    };
+    img.src = src;
+    if (img.complete && img.naturalWidth > 0) { clearTimeout(timer); finish(src); }
+  });
+}
+
+async function buildFrame(subtitle, players) {
+  const logos = await Promise.all(
+    players.map(p => preloadImage(p.logo || "", "Static/LOGOS - STATS/DEFAULT.png"))
+  );
+
+  const frame = document.createElement("div");
+  frame.style.position = "absolute";
+  frame.style.left = "0"; frame.style.top = "0";
+
+  function makeEl(tag, styles, extra) {
+    const el = document.createElement(tag);
+    Object.assign(el.style, { position: "absolute", ...styles });
+    if (extra) Object.assign(el, extra);
+    frame.appendChild(el);
+    return el;
+  }
+
+  const ST = CONFIG.staticText;
+  makeEl("div", {
+    left: ST.x + "px", top: ST.y + "px",
+    width: ST.w + "px", height: ST.h + "px",
+    fontSize: ST.fontSize + "px", color: ST.color,
+    fontFamily: ST.fontFamily, fontWeight: ST.fontWeight,
+    textTransform: "uppercase",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    outline: debugBorder, zIndex: "20",
+  }, { textContent: subtitle });
+
+  for (let i = 0; i < CONFIG.playerCount; i++) {
+    const p = players[i] || {};
+    const px = CONFIG.image.x + i * CONFIG.playerSpacing;
+    const py = CONFIG.image.y;
+    const iw = CONFIG.image.w;
+    const ih = CONFIG.image.h;
+
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      position: "absolute",
+      left: px + "px", top: py + "px",
+      width: iw + "px", height: ih + "px",
+      overflow: "hidden", zIndex: "11",
+    });
+    frame.appendChild(box);
+    const img = document.createElement("img");
+    Object.assign(img.style, { width: "100%", height: "100%", objectFit: "contain", display: "block" });
+    img.src = logos[i];
+    box.appendChild(img);
+
+    if (CONFIG.debug) {
+      const db = document.createElement("div");
+      Object.assign(db.style, {
+        position: "absolute", left: px + "px", top: py + "px",
+        width: iw + "px", height: ih + "px",
+        outline: "1px solid green", zIndex: "20", pointerEvents: "none",
+      });
+      frame.appendChild(db);
+    }
+
+    const lb = CONFIG.label;
+    makeEl("div", {
+      left: (lb.x + i * CONFIG.playerSpacing) + "px", top: lb.y + "px",
+      width: lb.w + "px", height: lb.h + "px",
+      fontSize: lb.fontSize + "px", color: lb.color,
+      fontFamily: lb.fontFamily, fontWeight: lb.fontWeight,
+      textTransform: "uppercase",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      outline: debugBorder, zIndex: "20",
+    }, { textContent: p.teamName || "" });
+
+    const n = CONFIG.name;
+    makeEl("div", {
+      left: (px + n.offsetX) + "px", top: (py + n.offsetY) + "px",
+      width: n.w + "px", height: n.h + "px",
+      fontSize: n.fontSize + "px", color: i === 0 ? n.color : "#ffffff",
+      fontFamily: n.fontFamily, fontWeight: n.fontWeight,
+      textTransform: "uppercase", whiteSpace: "pre", textAlign: "center",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      outline: debugBorder, zIndex: "20",
+    }, { textContent: p.playerNames || "" });
+
+    const k = CONFIG.kills;
+    makeEl("div", {
+      left: (px + k.offsetX) + "px", top: (py + k.offsetY) + "px",
+      width: k.w + "px", height: k.h + "px",
+      fontSize: k.fontSize + "px", color: k.color,
+      fontFamily: k.fontFamily, fontWeight: k.fontWeight,
+      textTransform: "uppercase",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      outline: debugBorder, zIndex: "20",
+    }, { textContent: p.kills || "" });
+  }
+
+  return frame;
+}
+
+let renderToken = 0;
+
+async function render(subtitle, players) {
+  const token = ++renderToken;
+  const frame = await buildFrame(subtitle, players);
+  if (token !== renderToken) return;
+  content.innerHTML = "";
+  content.appendChild(frame);
+}
+
+async function fetchAndRender() {
+  try {
+    const res = await fetch(DATA_URL);
+    const data = await res.json();
+    const rows = data.values || [];
+
+    const subtitle = (rows[0] || [])[0] || "";
+    const players = [];
+    for (let i = 1; i <= 5; i++) {
+      const row = rows[i] || [];
+      players.push({
+        teamName:    row[0] || "",
+        playerNames: row[3] || "",
+        kills:       row[2] || "",
+        logo:        logoPath(row[4]),
+      });
+    }
+    render(subtitle, players);
+  } catch(e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+fetchAndRender();
+setInterval(fetchAndRender, REFRESH_MS);
+</script>
+
+</body>
+</html>
+
