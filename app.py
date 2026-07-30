@@ -6,6 +6,7 @@ schedule (each with the key baked into client-side JS), this app polls the
 sheet once in the background every REFRESH_SECONDS and hands the cached
 values to each page over a local endpoint. Pages just fetch /api/data/<key>.
 """
+import os
 import threading
 import time
 
@@ -13,7 +14,7 @@ import requests
 from flask import Flask, jsonify, abort, send_from_directory
 
 SHEET_ID = "1LBKYJNs68HzP5bYJWfuVBs9FflbE68g7UJcvH9Sjf0c"
-API_KEY = "AIzaSyDmo1obbuamahEv3wyV4hh9hfOJ8CW9A9s"
+API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 REFRESH_SECONDS = 15
 
 # key -> sheet range. Keys are what the HTML pages request via /api/data/<key>.
@@ -93,4 +94,4 @@ RANGES_TO_FILES = [
 
 if __name__ == "__main__":
     threading.Thread(target=_poll_loop, daemon=True).start()
-    app.run(host="127.0.0.1", port=5000)
+    app.run(host="0.0.0.0", port=5000)
