@@ -33,7 +33,6 @@ app = Flask(__name__, static_folder=None)
 _cache_lock = threading.Lock()
 _cache = {key: {"values": []} for key in RANGES}
 
-
 def _fetch_all():
     """One batchGet call for every range, instead of one request per page."""
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values:batchGet"
@@ -54,6 +53,11 @@ def _poll_loop():
     while True:
         _fetch_all()
         time.sleep(REFRESH_SECONDS)
+
+
+# Start background polling at import time so it works with both
+# `python app.py` (dev) and gunicorn (production).
+threading.Thread(target=_poll_loop, daemon=True).start()
 
 
 @app.route("/api/data/<key>")
@@ -93,5 +97,4 @@ RANGES_TO_FILES = [
 
 
 if __name__ == "__main__":
-    threading.Thread(target=_poll_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
