@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 400; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_REGULAR.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 700; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_BOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100%;
+    background: #0b0b0f;
+    font-family: "GeomGraphic", sans-serif;
+    color: #ffffff;
+  }
+  #wrap {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 12px 16px 24px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  #meta {
+    font-size: 12px;
+    color: #aaaaaa;
+    margin-bottom: 8px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th, td {
+    padding: 1px 8px;
+    text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    white-space: nowrap;
+    line-height: 1.5;
+  }
+  th:nth-child(-n+2), td:nth-child(-n+2) {
+    text-align: left;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: #0b0b0f;
+    text-transform: uppercase;
+    font-weight: 600;
+    font-size: 11px;
+    color: #F0F046;
+    padding-bottom: 3px;
+    border-bottom: 1px solid rgba(255,255,255,0.3);
+    z-index: 1;
+  }
+  tr.team-row td {
+    font-weight: 600;
+    font-size: 13px;
+    background: rgba(255,255,255,0.06);
+  }
+  tr.team-row.team-eliminated td {
+    background: rgba(220,50,50,0.25);
+    color: #ff6b6b;
+  }
+  tr.name-row td {
+    font-weight: 400;
+    color: #ffffff;
+  }
+  tr.stat-row td {
+    font-weight: 300;
+    color: #dddddd;
+  }
+  tr.team-spacer td {
+    border-bottom: none;
+    padding: 1px 0;
+  }
+
+  @media (max-width: 720px) {
+    table, thead, tbody, tr { display: block; }
+    thead { display: none; }
+    tr.team-spacer { height: 12px; }
+    tr.team-row td, tr.name-row td {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: none;
+      padding: 2px 10px;
+      white-space: normal;
+    }
+    tr.team-row { border-top: 2px solid rgba(255,255,255,0.2); padding-top: 6px; }
+    td[data-label]::before {
+      content: attr(data-label);
+      color: #F0F046;
+      font-size: 11px;
+      text-transform: uppercase;
+      margin-right: 12px;
+    }
+    td:empty { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1 id="event-title">Live Event Map</h1>
+  <div id="meta"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Placement</th>
+        <th>Team / Player</th>
+        <th>Kills</th>
+        <th>Downs</th>
+        <th>Revives</th>
+        <th>Damage</th>
+        <th>Health</th>
+        <th>Armor</th>
+        <th>Plates</th>
+        <th>Cash</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<script>
+const USE_MOCK = new URLSearchParams(location.search).get("mock") === "1";
+const DATA_URL           = USE_MOCK ? "/api/live-event-map-mock" : "/api/live-event-map";
+const VIEW_MODE_URL      = "/api/view-mode";
+const HIDE_DEAD_GEAR_URL = "/api/hide-dead-gear";
+const REFRESH_MS         = 5000;
+
+const titleEl = document.getElementById("event-title");
+const metaEl  = document.getElementById("meta");
+const rowsEl  = document.getElementById("rows");
+
+let viewMode = "full";
+let hideDeadGear = false;
+let lastData = null;
+
+function esc(v) {
+  return String(v === undefined || v === null ? "" : v);
+}
+
+function render(data) {
+  const allTeams = data.teams || [];
+
+  titleEl.textContent = data.event || "Live Event Map";
+  metaEl.textContent =
+    `Map ${esc(data.map_number)} · Squads Alive ${esc(data.squads_alive)}/${esc(data.total_teams)} · Zone ${esc(data.zone && data.zone.number)}`;
+
+  const teamKills = (t) => (t.players || []).reduce((s, p) => s + (p.kills || 0), 0);
+  const sorted = [...allTeams].sort((a, b) => teamKills(b) - teamKills(a));
+
+  const html = sorted.map(team => {
+    const players = team.players || [];
+
+    const sum = (field) => players.reduce((s, p) => s + (p[field] || 0), 0);
+    const teamEliminated = players.length > 0 && players.every(p => p.is_dead);
+    const blankGear = hideDeadGear && teamEliminated;
+
+    const teamRow = `
+      <tr class="team-row ${teamEliminated ? "team-eliminated" : ""}">
+        <td data-label="Placement">${team.placement ? esc(team.placement) : ""}</td>
+        <td data-label="Team">${esc(team.team_name)}</td>
+        <td data-label="Kills">${sum("kills")}</td>
+        <td data-label="Downs">${esc(team.team_downs)}</td>
+        <td data-label="Revives">${esc(team.team_revives)}</td>
+        <td data-label="Damage">${esc(team.team_damage_done)}</td>
+        <td data-label="Health">${blankGear ? "" : sum("health")}</td>
+        <td data-label="Armor">${blankGear ? "" : sum("armor")}</td>
+        <td data-label="Plates">${blankGear ? "" : sum("plates")}</td>
+        <td data-label="Cash">${blankGear ? "" : sum("cash")}</td>
+        <td></td>
+      </tr>`;
+
+    if (viewMode === "team") {
+      const spacer = `<tr class="team-spacer"><td colspan="11"></td></tr>`;
+      return teamRow + spacer;
+    }
+
+    // In "alive" mode, skip rows for players who are individually dead —
+    // still show every team (including fully eliminated ones), just tighter.
+    const visiblePlayers = viewMode === "alive" ? players.filter(p => !p.is_dead) : players;
+
+    // Each player's name and stats together on one row, stacked under the team.
+    const playerRows = visiblePlayers.map(p => `
+      <tr class="name-row ${p.is_dead ? "dead" : ""}">
+        <td></td>
+        <td data-label="Player">${esc(p.name)}</td>
+        <td data-label="Kills">${esc(p.kills)}</td>
+        <td data-label="Downs">${esc(p.downs)}</td>
+        <td data-label="Revives">${esc(p.revives)}</td>
+        <td data-label="Damage">${esc(p.damage_done)}</td>
+        <td data-label="Health">${blankGear ? "" : esc(p.health)}</td>
+        <td data-label="Armor">${blankGear ? "" : esc(p.armor)}</td>
+        <td data-label="Plates">${blankGear ? "" : esc(p.plates)}</td>
+        <td data-label="Cash">${blankGear ? "" : esc(p.cash)}</td>
+        <td data-label="Status">${p.is_dead ? "Eliminated" : "Alive"}</td>
+      </tr>`).join("");
+
+    const spacer = `<tr class="team-spacer"><td colspan="11"></td></tr>`;
+
+    return teamRow + playerRows + spacer;
+  }).join("");
+
+  rowsEl.innerHTML = html;
+}
+
+// Render an empty scaffold immediately so the table is visible on load,
+// before the first fetch has resolved.
+render({ event: "Live Event Map", total_teams: 0, squads_alive: 0, map_number: 0, zone: {}, teams: [] });
+
+async function fetchViewMode() {
+  try {
+    const res = await fetch(VIEW_MODE_URL);
+    const data = await res.json();
+    if (data && data.mode) viewMode = data.mode;
+  } catch (e) {
+    console.error("View mode fetch error:", e);
+  }
+}
+
+async function fetchHideDeadGear() {
+  try {
+    const res = await fetch(HIDE_DEAD_GEAR_URL);
+    const data = await res.json();
+    if (data && typeof data.hide === "boolean") hideDeadGear = data.hide;
+  } catch (e) {
+    console.error("Hide-dead-gear fetch error:", e);
+  }
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch(DATA_URL);
+    lastData = await res.json();
+  } catch (e) {
+    console.error("Fetch error:", e);
+  }
+}
+
+async function tick() {
+  await Promise.all([fetchViewMode(), fetchHideDeadGear(), fetchData()]);
+  // Always render what came back, even all-zero data — only a network/
+  // parse failure leaves the last good render up.
+  if (lastData) render(lastData);
+}
+
+tick();
+setInterval(tick, REFRESH_MS);
+</script>
+</body>
+</html>
