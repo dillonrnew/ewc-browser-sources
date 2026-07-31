@@ -6,6 +6,7 @@ schedule (each with the key baked into client-side JS), this app polls the
 sheet once in the background every REFRESH_SECONDS and hands the cached
 values to each page over a local endpoint. Pages just fetch /api/data/<key>.
 """
+import os
 import threading
 import time
 
@@ -13,7 +14,7 @@ import requests
 from flask import Flask, jsonify, abort, request, send_from_directory
 
 SHEET_ID = "1LBKYJNs68HzP5bYJWfuVBs9FflbE68g7UJcvH9Sjf0c"
-API_KEY = "AIzaSyDmo1obbuamahEv3wyV4hh9hfOJ8CW9A9s"
+API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 REFRESH_SECONDS = 15
 
 LIVE_EVENT_MAP_URL = "https://scoring.mcdonald.gg/LiveEventMap"
@@ -230,6 +231,12 @@ def _live_event_map_poll_loop():
         time.sleep(LIVE_EVENT_MAP_REFRESH_SECONDS)
 
 
+# Start background polling at import time so it works with both
+# `python app.py` (dev) and gunicorn (production).
+threading.Thread(target=_poll_loop, daemon=True).start()
+threading.Thread(target=_live_event_map_poll_loop, daemon=True).start()
+
+
 @app.route("/api/data/<key>")
 def api_data(key):
     if key not in RANGES:
@@ -308,6 +315,4 @@ def _no_cache(response):
 
 
 if __name__ == "__main__":
-    threading.Thread(target=_poll_loop, daemon=True).start()
-    threading.Thread(target=_live_event_map_poll_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=5000)
