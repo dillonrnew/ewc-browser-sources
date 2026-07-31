@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Table Controls</title>
+<style>
+  @font-face { font-family: "GeomGraphic"; font-weight: 300; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_LIGHT.OTF'); }
+  @font-face { font-family: "GeomGraphic"; font-weight: 600; src: url('Static/FONTS/FONNTS.COM-GEOM_GRAPHIC_SEMIBOLD.OTF'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    min-height: 100%;
+    background: #0b0b0f;
+    color: #ffffff;
+    font-family: "GeomGraphic", sans-serif;
+  }
+  #wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 32px 20px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  #status {
+    text-align: center;
+    font-size: 13px;
+    color: #aaaaaa;
+    margin-bottom: 24px;
+    min-height: 16px;
+  }
+  .option {
+    display: block;
+    width: 100%;
+    padding: 20px 16px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .option .desc {
+    display: block;
+    font-size: 13px;
+    font-weight: 300;
+    color: #aaaaaa;
+    margin-top: 4px;
+  }
+  .option.active {
+    border-color: #F0F046;
+    background: rgba(240,240,70,0.12);
+  }
+  .option.active .desc { color: #ddd; }
+  .option:active { background: rgba(255,255,255,0.12); }
+  h2 {
+    font-size: 15px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 28px 0 12px;
+    color: #aaaaaa;
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-radius: 10px;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+  }
+  .toggle-row .desc {
+    font-size: 13px;
+    font-weight: 300;
+    color: #aaaaaa;
+    margin-top: 4px;
+    max-width: 320px;
+  }
+  .switch {
+    position: relative;
+    flex: 0 0 auto;
+    width: 48px;
+    height: 28px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.2);
+    border: none;
+    cursor: pointer;
+    margin-left: 16px;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    transition: transform 0.15s;
+  }
+  .switch.on {
+    background: #F0F046;
+  }
+  .switch.on::after {
+    transform: translateX(20px);
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Team Table View</h1>
+  <div id="status">Loading current mode…</div>
+
+  <button class="option" data-mode="full">
+    Full Details
+    <span class="desc">Team totals plus every player's stats</span>
+  </button>
+
+  <button class="option" data-mode="team">
+    Team Details Only
+    <span class="desc">Just team-level rows, no individual players</span>
+  </button>
+
+  <button class="option" data-mode="alive">
+    Alive Players Only
+    <span class="desc">All teams stay visible, but eliminated players' rows are hidden to save space</span>
+  </button>
+
+  <h2>Options</h2>
+  <div class="toggle-row">
+    <div>
+      <div>Blank gear stats on eliminated teams</div>
+      <div class="desc">Health/Armor/Plates/Cash show as "" for fully eliminated teams instead of the endpoint's last (often stale) values</div>
+    </div>
+    <button class="switch" id="hide-dead-gear-switch" aria-label="Toggle blank gear stats on eliminated teams"></button>
+  </div>
+</div>
+
+<script>
+const MODE_URL = "/api/view-mode";
+const HIDE_DEAD_GEAR_URL = "/api/hide-dead-gear";
+const buttons = Array.from(document.querySelectorAll(".option"));
+const statusEl = document.getElementById("status");
+const hideDeadGearSwitch = document.getElementById("hide-dead-gear-switch");
+
+function applyActive(mode) {
+  buttons.forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
+}
+
+async function loadMode() {
+  try {
+    const res = await fetch(MODE_URL);
+    const data = await res.json();
+    applyActive(data.mode);
+    statusEl.textContent = "Current mode: " + data.mode;
+  } catch (e) {
+    statusEl.textContent = "Couldn't load current mode.";
+  }
+}
+
+async function setMode(mode) {
+  statusEl.textContent = "Updating…";
+  try {
+    const res = await fetch(MODE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await res.json();
+    applyActive(data.mode);
+    statusEl.textContent = "Current mode: " + data.mode;
+  } catch (e) {
+    statusEl.textContent = "Failed to update mode.";
+  }
+}
+
+buttons.forEach(b => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+async function loadHideDeadGear() {
+  try {
+    const res = await fetch(HIDE_DEAD_GEAR_URL);
+    const data = await res.json();
+    hideDeadGearSwitch.classList.toggle("on", !!data.hide);
+  } catch (e) {
+    // leave switch as-is on failure
+  }
+}
+
+async function setHideDeadGear(hide) {
+  try {
+    const res = await fetch(HIDE_DEAD_GEAR_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hide }),
+    });
+    const data = await res.json();
+    hideDeadGearSwitch.classList.toggle("on", !!data.hide);
+  } catch (e) {
+    // no-op; next poll will resync
+  }
+}
+
+hideDeadGearSwitch.addEventListener("click", () => {
+  setHideDeadGear(!hideDeadGearSwitch.classList.contains("on"));
+});
+
+loadMode();
+loadHideDeadGear();
+setInterval(loadMode, 5000);
+setInterval(loadHideDeadGear, 5000);
+</script>
+</body>
+</html>
