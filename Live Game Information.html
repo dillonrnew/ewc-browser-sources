@@ -67,6 +67,14 @@
     background: rgba(220,50,50,0.25);
     color: #ff6b6b;
   }
+  tr.team-row.match-point td {
+    background: rgba(255,255,255,0.28);
+    color: #ffffff;
+  }
+  tr.team-row.match-point.team-eliminated td {
+    background: rgba(220,50,50,0.4);
+    color: #ff6b6b;
+  }
   tr.name-row td {
     font-weight: 400;
     color: #ffffff;
@@ -132,6 +140,7 @@ const USE_MOCK = new URLSearchParams(location.search).get("mock") === "1";
 const DATA_URL           = USE_MOCK ? "/api/live-event-map-mock" : "/api/live-event-map";
 const VIEW_MODE_URL      = "/api/view-mode";
 const HIDE_DEAD_GEAR_URL = "/api/hide-dead-gear";
+const MATCH_POINT_URL    = "/api/match-point-teams";
 const REFRESH_MS         = 5000;
 
 const titleEl = document.getElementById("event-title");
@@ -140,6 +149,7 @@ const rowsEl  = document.getElementById("rows");
 
 let viewMode = "full";
 let hideDeadGear = false;
+let matchPointTeams = new Set();
 let lastData = null;
 
 function esc(v) {
@@ -154,7 +164,12 @@ function render(data) {
     `Map ${esc(data.map_number)} · Squads Alive ${esc(data.squads_alive)}/${esc(data.total_teams)} · Zone ${esc(data.zone && data.zone.number)}`;
 
   const teamKills = (t) => (t.players || []).reduce((s, p) => s + (p.kills || 0), 0);
-  const sorted = [...allTeams].sort((a, b) => teamKills(b) - teamKills(a));
+  const isMatchPoint = (t) => matchPointTeams.has(t.team_name);
+  const sorted = [...allTeams].sort((a, b) => {
+    const mpDiff = (isMatchPoint(b) ? 1 : 0) - (isMatchPoint(a) ? 1 : 0);
+    if (mpDiff !== 0) return mpDiff;
+    return teamKills(b) - teamKills(a);
+  });
 
   const html = sorted.map(team => {
     const players = team.players || [];
@@ -162,9 +177,10 @@ function render(data) {
     const sum = (field) => players.reduce((s, p) => s + (p[field] || 0), 0);
     const teamEliminated = players.length > 0 && players.every(p => p.is_dead);
     const blankGear = hideDeadGear && teamEliminated;
+    const matchPoint = isMatchPoint(team);
 
     const teamRow = `
-      <tr class="team-row ${teamEliminated ? "team-eliminated" : ""}">
+      <tr class="team-row ${matchPoint ? "match-point" : ""} ${teamEliminated ? "team-eliminated" : ""}">
         <td data-label="Placement">${team.placement ? esc(team.placement) : ""}</td>
         <td data-label="Team">${esc(team.team_name)}</td>
         <td data-label="Kills">${sum("kills")}</td>
@@ -235,6 +251,16 @@ async function fetchHideDeadGear() {
   }
 }
 
+async function fetchMatchPointTeams() {
+  try {
+    const res = await fetch(MATCH_POINT_URL);
+    const data = await res.json();
+    if (data && Array.isArray(data.teams)) matchPointTeams = new Set(data.teams);
+  } catch (e) {
+    console.error("Match point fetch error:", e);
+  }
+}
+
 async function fetchData() {
   try {
     const res = await fetch(DATA_URL);
@@ -245,7 +271,7 @@ async function fetchData() {
 }
 
 async function tick() {
-  await Promise.all([fetchViewMode(), fetchHideDeadGear(), fetchData()]);
+  await Promise.all([fetchViewMode(), fetchHideDeadGear(), fetchMatchPointTeams(), fetchData()]);
   // Always render what came back, even all-zero data — only a network/
   // parse failure leaves the last good render up.
   if (lastData) render(lastData);

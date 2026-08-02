@@ -113,6 +113,13 @@
   .switch.on::after {
     transform: translateX(20px);
   }
+  #match-point-list .toggle-row {
+    margin-bottom: 10px;
+  }
+  #match-point-list .toggle-row.match-point {
+    border-color: #ffffff;
+    background: rgba(255,255,255,0.15);
+  }
 </style>
 </head>
 <body>
@@ -143,6 +150,10 @@
     </div>
     <button class="switch" id="hide-dead-gear-switch" aria-label="Toggle blank gear stats on eliminated teams"></button>
   </div>
+
+  <h2>Match Point Teams</h2>
+  <div id="match-point-status" class="desc" style="margin-bottom: 12px;">Loading teams…</div>
+  <div id="match-point-list"></div>
 </div>
 
 <script>
@@ -213,10 +224,81 @@ hideDeadGearSwitch.addEventListener("click", () => {
   setHideDeadGear(!hideDeadGearSwitch.classList.contains("on"));
 });
 
+const LIVE_EVENT_MAP_URL = "/api/live-event-map";
+const MATCH_POINT_URL = "/api/match-point-teams";
+const matchPointStatusEl = document.getElementById("match-point-status");
+const matchPointListEl = document.getElementById("match-point-list");
+
+let matchPointTeams = new Set();
+let knownTeamNames = [];
+
+function renderMatchPointList() {
+  if (knownTeamNames.length === 0) {
+    matchPointStatusEl.textContent = "No teams found yet.";
+    matchPointListEl.innerHTML = "";
+    return;
+  }
+  matchPointStatusEl.textContent = "Tap a team to mark it (or unmark it) as match point.";
+  matchPointListEl.innerHTML = knownTeamNames.map(name => {
+    const on = matchPointTeams.has(name);
+    return `
+      <div class="toggle-row ${on ? "match-point" : ""}" data-team="${name.replace(/"/g, "&quot;")}">
+        <div>${name}</div>
+        <button class="switch ${on ? "on" : ""}" aria-label="Toggle match point for ${name}"></button>
+      </div>`;
+  }).join("");
+
+  matchPointListEl.querySelectorAll(".toggle-row").forEach(row => {
+    row.addEventListener("click", () => setMatchPoint(row.dataset.team, !matchPointTeams.has(row.dataset.team)));
+  });
+}
+
+async function loadTeamNames() {
+  try {
+    const res = await fetch(LIVE_EVENT_MAP_URL);
+    const data = await res.json();
+    const names = (data.teams || []).map(t => t.team_name).filter(Boolean);
+    if (names.length) knownTeamNames = names;
+  } catch (e) {
+    // keep previous list on failure
+  }
+  renderMatchPointList();
+}
+
+async function loadMatchPointTeams() {
+  try {
+    const res = await fetch(MATCH_POINT_URL);
+    const data = await res.json();
+    matchPointTeams = new Set(data.teams || []);
+  } catch (e) {
+    // leave as-is on failure
+  }
+  renderMatchPointList();
+}
+
+async function setMatchPoint(team, on) {
+  try {
+    const res = await fetch(MATCH_POINT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ team, on }),
+    });
+    const data = await res.json();
+    matchPointTeams = new Set(data.teams || []);
+  } catch (e) {
+    // no-op; next poll will resync
+  }
+  renderMatchPointList();
+}
+
 loadMode();
 loadHideDeadGear();
+loadTeamNames();
+loadMatchPointTeams();
 setInterval(loadMode, 5000);
 setInterval(loadHideDeadGear, 5000);
+setInterval(loadTeamNames, 5000);
+setInterval(loadMatchPointTeams, 5000);
 </script>
 </body>
 </html>

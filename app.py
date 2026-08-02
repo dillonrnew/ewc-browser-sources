@@ -11,7 +11,10 @@ import threading
 import time
 
 import requests
+from dotenv import load_dotenv
 from flask import Flask, jsonify, abort, request, send_from_directory
+
+load_dotenv()
 
 SHEET_ID = "1LBKYJNs68HzP5bYJWfuVBs9FflbE68g7UJcvH9Sjf0c"
 API_KEY = os.environ.get("GOOGLE_API_KEY", "")
@@ -190,6 +193,9 @@ _view_mode = "full"
 _hide_dead_gear_lock = threading.Lock()
 _hide_dead_gear = False
 
+_match_point_lock = threading.Lock()
+_match_point_teams = set()
+
 
 def _fetch_all():
     """One batchGet call for every range, instead of one request per page."""
@@ -284,6 +290,25 @@ def api_hide_dead_gear():
             _hide_dead_gear = value
     with _hide_dead_gear_lock:
         return jsonify({"hide": _hide_dead_gear})
+
+
+@app.route("/api/match-point-teams", methods=["GET", "POST"])
+def api_match_point_teams():
+    """Team names currently flagged as being on match point."""
+    global _match_point_teams
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        team = body.get("team")
+        on = body.get("on")
+        if not isinstance(team, str) or not team or not isinstance(on, bool):
+            abort(400)
+        with _match_point_lock:
+            if on:
+                _match_point_teams.add(team)
+            else:
+                _match_point_teams.discard(team)
+    with _match_point_lock:
+        return jsonify({"teams": sorted(_match_point_teams)})
 
 
 @app.route("/Static/<path:filename>")
